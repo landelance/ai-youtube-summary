@@ -12,7 +12,6 @@ import asyncio
 import google.generativeai as genai
 try:
     from google.ai import generativelanguage as glm
-    ### NEW ###
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
 except ImportError:
     print("CRITICAL: Failed to import google.ai.generativelanguage (glm). Ensure 'google-ai-generativelanguage' is installed.")
@@ -42,7 +41,6 @@ try:
 except ImportError:
     print(
         "WARNING: Failed to import one or more Google API/Auth libraries (googleapiclient, google-auth, google-auth-oauthlib). "
-        "The 'Transcript & Summary (OAuth2)' placeholder option relies on these for its future full implementation. "
         "Please ensure these are installed in your virtual environment if you plan to develop that feature: "
         "pip install google-api-python-client google-auth google-auth-oauthlib"
     )
@@ -82,30 +80,9 @@ GOOGLE_LOCATION = os.getenv("GOOGLE_LOCATION")
 YOUTUBE_OAUTH_CLIENT_SECRETS_PATH = os.getenv("YOUTUBE_OAUTH_CLIENT_SECRETS_PATH")
 YOUTUBE_OAUTH_REFRESH_TOKEN = os.getenv("YOUTUBE_OAUTH_REFRESH_TOKEN")
 
-logger.info(f"AI_COUNCIL_TELEGRAM_BOT_TOKEN is {'SET' if AI_COUNCIL_TELEGRAM_BOT_TOKEN else 'NOT SET'}")
-logger.info(f"AUTHORIZED_USER_ID is {AUTHORIZED_USER_ID}")
-logger.info(f"GEMINI_API_KEY is {'SET' if GEMINI_API_KEY else 'NOT SET'}")
-logger.info(f"GOOGLE_PROJECT_ID is {'SET' if GOOGLE_PROJECT_ID else 'NOT SET'}")
-logger.info(f"GOOGLE_LOCATION is {'SET' if GOOGLE_LOCATION else 'NOT SET'}")
-logger.info(f"YOUTUBE_OAUTH_CLIENT_SECRETS_PATH is {'SET (for external script)' if YOUTUBE_OAUTH_CLIENT_SECRETS_PATH else 'NOT SET'}")
-logger.info(f"YOUTUBE_OAUTH_REFRESH_TOKEN is {'SET (for external script)' if YOUTUBE_OAUTH_REFRESH_TOKEN else 'NOT SET'}")
-logger.info(f"GOOGLE_APPLICATION_CREDENTIALS is {'SET' if os.getenv('GOOGLE_APPLICATION_CREDENTIALS') else 'NOT SET'}")
-
 if not all([AI_COUNCIL_TELEGRAM_BOT_TOKEN, AUTHORIZED_USER_ID != 0]):
     logger.critical("CRITICAL ERROR: Missing AI_COUNCIL_TELEGRAM_BOT_TOKEN or AUTHORIZED_USER_ID is not set correctly. Exiting.")
     exit()
-logger.info("Critical .env variables checked (Token, Auth ID).")
-
-if _google_oauth_libs_imported_successfully:
-    logger.info("Successfully imported Google OAuth libraries (googleapiclient, google.oauth2, google.auth).")
-else:
-    logger.warning("One or more Google OAuth libraries (googleapiclient, google.oauth2, google.auth) FAILED to import. 'Transcript & Summary (OAuth2)' placeholder option might show library errors if fully implemented without them.")
-
-logger.info(f"Post-import check: 'build' is {'DEFINED' if build is not None else 'None (Import Failed)'}")
-logger.info(f"Post-import check: 'google_oauth2_credentials' (module) is {'ACCESSIBLE via import' if google_oauth2_credentials is not None else 'None (Import Failed)'}")
-logger.info(f"Post-import check: 'GoogleAuthRequest' is {'DEFINED' if GoogleAuthRequest is not None else 'None (Import Failed)'}")
-logger.info(f"Post-import check: 'GoogleAuthRefreshError' is {'DEFINED' if GoogleAuthRefreshError is not None else 'None (Import Failed)'}")
-logger.info(f"Post-import check: 'HttpError' is {'DEFINED' if HttpError is not None else 'None (Import Failed)'}")
 
 if GEMINI_API_KEY:
     try:
@@ -120,13 +97,13 @@ if not all([GOOGLE_PROJECT_ID, GOOGLE_LOCATION]):
     logger.warning("GOOGLE_PROJECT_ID or GOOGLE_LOCATION not set. Vertex AI summarization method may fail.")
 logger.info("Environment variable checks complete.")
 
-# --- Models, Constants, and Prompts ---
+# --- Models & Constants ---
 DB_NAME = "telegram_bot.db"
 REQ_TYPE_GENERAL = "general_query"
 REQ_TYPE_YOUTUBE_GEMINI_API = "youtube_summary_gemini_api"
 REQ_TYPE_YOUTUBE_VERTEX_AI = "youtube_summary_vertex_ai"
 REQ_TYPE_YOUTUBE_SUPER_TRANSCRIPT = "youtube_super_transcript"
-REQ_TYPE_YOUTUBE_TRANSCRIPT_PLACEHOLDER = "youtube_transcript_placeholder"
+REQ_TYPE_CUSTOM_PROMPT_PLACEHOLDER = "custom_prompt_placeholder" ### NEW ###
 REQ_TYPE_REPLY_TO_SUMMARY = "reply_to_summary"
 STATUS_PENDING = "pending"
 STATUS_SUCCESS = "success"
@@ -140,88 +117,39 @@ GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-1.5-flash")
 VERTEX_AI_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_VERTEX", "gemini-1.5-flash")
 TEXT_SUMMARY_MODEL = os.getenv("GEMINI_MODEL_TEXT_SUMMARY", "gemini-1.5-flash")
 
-# Conversation states
-CHOOSING_SUMMARY_METHOD, CHOOSING_LANGUAGE, PROCESSING_SUMMARY = range(3)
+# ### MODIFIED ###: Added new state for the submenu
+CHOOSING_SUMMARY_METHOD, CHOOSING_LANGUAGE, CHOOSING_CUSTOM_PROMPT, PROCESSING_SUMMARY = range(4)
 
-DETAILED_VIDEO_SUMMARY_PROMPT_TEMPLATE = (
-    "Пожалуйста, предоставь подробное, структурированное и всестороннее резюме YouTube-видео на {language_name_locative} языке. "
-    "Резюме должно быть легко читаемым, логически организованным и максимально информативным, включая анализ как вербального, так и визуального содержания. "
-    "Используй Markdown для форматирования заголовков и списков на {language_name_locative} языке. Включи следующие разделы:\n\n"
-    "## Основная тема (Main Topic)\n"
-    "Кратко опиши центральную тему или цель видео (1-2 предложения). Укажи, какую проблему или вопрос видео стремится решить или объяснить.\n\n"
-    "## Контекст и цель видео (Context and Purpose)\n"
-    "Опиши контекст видео: кто автор, для какой аудитории предназначено видео, и какова его цель (например, обучение, демонстрация, мотивация, обзор). "
-    "Если в видео упоминается конкретное событие, тренд или фоновая информация, кратко изложи это.\n\n"
-    "## Ключевые моменты (Key Points)\n"
-    "Перечисли 4-6 основных моментов, идей, аргументов или фактов, представленных в видео. "
-    "Для каждого пункта предоставь краткое объяснение (2-3 предложения), включая примеры или детали, упомянутые в видео. "
-    "Используй маркированные списки. Если в видео есть визуальные элементы (графики, демонстрации, изображения), опиши их вклад в передачу информации.\n\n"
-    "## Визуальные элементы (Visual Elements) - (Если применимо)\n"
-    "Опиши ключевые визуальные компоненты видео (например, анимации, демонстрации экрана, слайды, физические объекты, действия). "
-    "Объясни, как эти элементы усиливают или дополняют вербальное содержание. "
-    "Если визуальная часть играет важную роль (например, в демонстрациях или туториалах), укажи, что именно показано и как это помогает понять тему.\n\n"
-    "## Основные выводы и практическое применение (Main Takeaways and Practical Applications)\n"
-    "Опиши ключевые выводы, уроки или практические советы, которые зритель может извлечь из видео. "
-    "Если применимо, укажи, как эти выводы могут быть применены в реальной жизни, учебе или работе.\n\n"
-    "## Обсуждаемые технологии/концепции (Discussed Technologies/Concepts) - (Если применимо)\n"
-    "Если в видео упоминаются конкретные технологии, инструменты, методики или сложные концепции, кратко опиши их (1-2 предложения на каждую). "
-    "Укажи их значение и роль в контексте видео. Если есть демонстрации использования технологий, упомяни это.\n\n"
-    "## Тон, стиль и структура видео (Tone, Style, and Structure)\n"
-    "Опиши общий тон видео (например, информативный, вдохновляющий, технический, развлекательный) и стиль подачи (например, формальный, разговорный, визуально насыщенный). "
-    "Укажи, как организована структура видео (например, пошаговое объяснение, повествование, демонстрация). "
-    "Если есть уникальные элементы (например, юмор, личные истории), отметь их.\n\n"
-    "## Дополнительные наблюдения (Additional Observations) - (Опционально)\n"
-    "Укажи любые дополнительные детали, которые не вошли в предыдущие разделы, но важны для понимания видео. "
-    "Это может включать уникальные аспекты (например, взаимодействие с аудиторией, неожиданные моменты) или ссылки на упомянутые ресурсы (веб-сайты, книги, статьи).\n\n"
-    "Инструкции:\n"
-    "- Сосредоточься на точности, ясности и полноте. Убедись, что резюме отражает как вербальное, так и визуальное содержание. "
-    "- Если визуальные элементы (например, демонстрации, слайды) составляют значительную часть видео, уделяй им особое внимание. "
-    "- Если в видео мало вербальной информации, но много визуальной, опиши, что показано, и попытайся интерпретировать его значение. "
-    "- Если в видео есть ссылки на внешние ресурсы (например, статьи, сайты), упомяни их с кратким описанием их значимости. "
-    "- Пиши на {language_name_locative} языке, используя естественный и профессиональный стиль."
-)
-
-SUPER_TRANSCRIPT_PROMPT_TEMPLATE = (
-    "You are an expert video analyst. Your task is to analyze the provided YouTube video and generate a comprehensive 'Super Transcript' in {language_name_locative}. "
-    "Your output MUST be a single, well-formatted Markdown document. Follow these instructions precisely:\n\n"
-    "1.  **Transcription with Speaker Diarization:** Transcribe all spoken content verbatim. Differentiate between speakers by labeling them (e.g., '**Speaker 1:**', '**Speaker 2:**', '**Interviewer:**'). If you cannot reliably differentiate speakers, use a generic label like '**Narrator:**'.\n"
-    "2.  **Time-stamping:** Precede each new speaker segment or significant event with an approximate timestamp in `[HH:MM:SS]` format. This is critical for navigation.\n"
-    "3.  **Visual and Non-Verbal Cues:** Inline with the transcript, describe important visual elements (e.g., on-screen text, specific slides, code demonstrations, graphs) and significant non-verbal audio (e.g., [upbeat music starts], [audience applause], [sound of a car engine]). You MUST enclose these descriptions in square brackets `[]`.\n"
-    "4.  **Emotional Tone Analysis (Optional):** Where the emotional tone of the speaker or the scene is distinct and important, add a brief 'Tone:' descriptor on its own line (e.g., *Tone: Humorous*, *Tone: Serious and Technical*).\n\n"
-    "--- EXAMPLE OUTPUT FORMAT ---\n"
-    "## Super Transcript\n\n"
-    "[00:00:01] [Upbeat electronic music plays over an animated channel logo]\n\n"
-    "[00:00:10]\n"
-    "**Speaker 1:** Hello everyone, and welcome back to the channel! Today, we have something truly special for you.\n"
-    "[On-screen text appears: 'The Future is Now']\n\n"
-    "[00:00:18]\n"
-    "**Speaker 1:** We're going to dive deep into the latest advancements in neural networks.\n"
-    "*Tone: Enthusiastic and engaging*\n\n"
-    "[00:00:25]\n"
-    "**Speaker 2:** That's right. As you can see from this graph on the screen, the performance jump in the last quarter alone is unprecedented.\n"
-    "[Camera focuses on a bar chart showing a steep upward trend labeled 'Model Performance Q3 vs Q4']\n\n"
-    "[00:00:38] [Sound of a notification chime]\n\n"
-    "--- END OF EXAMPLE ---\n\n"
-    "Now, generate the complete 'Super Transcript' for the provided video, following all instructions and formatting rules."
-)
-
-
-# Mapping for language names in locative case for the prompt
 LANGUAGE_NAME_MAP = {
     "ru": "русском",
     "en": "английском"
 }
 
-DEFAULT_TEXT_SUMMARY_PROMPT_RU_TEMPLATE = (
-    "Предоставь подробное и структурированное резюме на русском языке для следующего текста (вероятно, транскрипта видео). "
-    "Резюме должно быть легко читаемым и понятным. "
-    "Включи следующие разделы, если это возможно, используя Markdown для заголовков:\n\n"
-    "## Основная тема\n"
-    "## Ключевые моменты (в виде маркированного списка)\n"
-    "## Основные выводы\n\n"
-    "Текст для резюмирования:\n\n{text_to_summarize}"
-)
-logger.info("Constants, model names, and prompts defined.")
+# --- Helper function to load prompts ---
+def load_prompt(filename: str) -> str | None:
+    """Loads a prompt from a file in the 'prompts' directory."""
+    try:
+        # Get the absolute path of the directory where the script is located
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        prompt_path = os.path.join(base_dir, 'prompts', filename)
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.error(f"CRITICAL: Prompt file not found at {prompt_path}")
+        return None
+
+# --- Load Prompts from Files ---
+logger.info("Loading prompts from files...")
+DETAILED_VIDEO_SUMMARY_PROMPT_TEMPLATE = load_prompt("detailed_video_summary.txt")
+SUPER_TRANSCRIPT_PROMPT_TEMPLATE = load_prompt("super_transcript.txt")
+
+# Critical check to ensure prompts were loaded
+if not all([DETAILED_VIDEO_SUMMARY_PROMPT_TEMPLATE, SUPER_TRANSCRIPT_PROMPT_TEMPLATE]):
+    logger.critical("One or more essential prompt files could not be loaded from the 'prompts' folder. Exiting.")
+    exit()
+
+logger.info("All essential prompts loaded successfully.")
+
 
 # --- Authorization Decorator & DB Functions ---
 def authorized(func):
@@ -305,7 +233,7 @@ def get_conversation_history(user_id, limit=5):
                 ORDER BY id DESC LIMIT ?
             ''', (user_id, STATUS_SUCCESS,
                   REQ_TYPE_YOUTUBE_GEMINI_API, REQ_TYPE_YOUTUBE_VERTEX_AI,
-                  REQ_TYPE_YOUTUBE_SUPER_TRANSCRIPT, REQ_TYPE_YOUTUBE_TRANSCRIPT_PLACEHOLDER, REQ_TYPE_REPLY_TO_SUMMARY,
+                  REQ_TYPE_YOUTUBE_SUPER_TRANSCRIPT, REQ_TYPE_CUSTOM_PROMPT_PLACEHOLDER, REQ_TYPE_REPLY_TO_SUMMARY,
                   limit))
             rows = cursor.fetchall()
             for row in reversed(rows):
@@ -327,7 +255,7 @@ def get_summary_text_from_bot_message(bot_message_id: int, chat_id: int, bot_id:
                 WHERE message_id = ? AND chat_id = ? AND user_id = ? AND request_type IN (?, ?, ?, ?)
             ''', (bot_message_id, chat_id, bot_id,
                   REQ_TYPE_YOUTUBE_GEMINI_API, REQ_TYPE_YOUTUBE_VERTEX_AI,
-                  REQ_TYPE_YOUTUBE_SUPER_TRANSCRIPT, REQ_TYPE_YOUTUBE_TRANSCRIPT_PLACEHOLDER))
+                  REQ_TYPE_YOUTUBE_SUPER_TRANSCRIPT, REQ_TYPE_CUSTOM_PROMPT_PLACEHOLDER))
             result = cursor.fetchone()
             return result[0] if result else None
     except sqlite3.Error as e:
@@ -335,41 +263,8 @@ def get_summary_text_from_bot_message(bot_message_id: int, chat_id: int, bot_id:
         return None
 logger.info("DB functions defined.")
 
+
 # --- AI Integration & Features ---
-
-async def generate_text_summary(text_to_summarize: str, model_name: str, custom_prompt_template: str | None = None):
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY must be set to summarize text.")
-    try:
-        model = genai.GenerativeModel(model_name)
-        prompt_template_to_use = custom_prompt_template or DEFAULT_TEXT_SUMMARY_PROMPT_RU_TEMPLATE
-
-        if "{text_to_summarize}" not in prompt_template_to_use:
-            logger.warning("Custom prompt template for generate_text_summary missing {text_to_summarize} placeholder. Using default structure with provided template as prefix.")
-            prompt = f"{prompt_template_to_use}\n\nТекст для резюмирования:\n\n{text_to_summarize}"
-        else:
-            prompt = prompt_template_to_use.format(text_to_summarize=text_to_summarize)
-
-        max_llm_input_chars = 200000
-        if len(prompt) > max_llm_input_chars:
-            available_space_for_text = max_llm_input_chars - (len(prompt) - len(text_to_summarize))
-            if available_space_for_text > 100:
-                 text_to_summarize_truncated = text_to_summarize[:available_space_for_text - 50]
-                 prompt = prompt_template_to_use.format(text_to_summarize=text_to_summarize_truncated + "\n...[TRUNCATED DUE TO LENGTH]...")
-                 logger.warning(f"Input text for summarization truncated to fit model input limits.")
-            else:
-                prompt = prompt[:max_llm_input_chars]
-                logger.warning(f"Entire prompt for summarization truncated to {max_llm_input_chars} characters.")
-
-        response = await model.generate_content_async(prompt)
-        summary = response.text.strip()
-        if not summary:
-            raise ValueError("Failed to get summary: Empty content in response from Gemini API.")
-        return summary
-    except Exception as e:
-        logger.error(f"Error during text summarization with model {model_name}: {e}", exc_info=True)
-        raise ValueError(f"Gemini API error during text summarization: {e}")
-
 async def generate_chat_response(prompt, history=None):
     try:
         model = genai.GenerativeModel(CHAT_MODEL_NAME)
@@ -385,14 +280,12 @@ def extract_video_id(url):
     match = re.search(regex, url)
     return match.group(1) if match else None
 
-### MODIFIED ###
 async def summarize_youtube_via_gemini_api(youtube_link: str, video_id: str, prompt_text: str):
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY must be set for this summarization method.")
     if not glm:
         raise ImportError("google.ai.generativelanguage (glm) module is not available.")
     try:
-        # Define safety settings to be less strict on harassment/recitation
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
@@ -407,35 +300,27 @@ async def summarize_youtube_via_gemini_api(youtube_link: str, video_id: str, pro
         contents = [video_part, glm.Part(text=prompt_text)]
         logger.info(f"Sending content to Direct Gemini API for summarization. URI: {youtube_link}")
 
-        # Call the API with the new safety settings
         response = await model.generate_content_async(
             contents,
             safety_settings=safety_settings
         )
 
-        # Better error handling for blocked responses
         try:
             summary = response.text
         except ValueError:
             logger.warning(f"response.text failed. Raw response: {response}")
-            # Check if the response was blocked and provide a specific reason
             if response.prompt_feedback and response.prompt_feedback.block_reason == 'SAFETY':
-                # Check for recitation specifically
-                if response.candidates and response.candidates[0].finish_reason == 4: # 4 is RECITATION
+                if response.candidates and response.candidates[0].finish_reason == 4:
                      raise ValueError("Content blocked by API safety filters due to potential recitation of copyrighted material. Please try a different video.")
-
                 raise ValueError("The API response was blocked by safety filters for reasons other than recitation.")
-
             raise ValueError("The API returned an invalid or empty response.")
 
         if not summary:
             raise ValueError("Failed to get summary: Empty content in response from Direct Gemini API.")
-
         return summary
 
     except Exception as e:
         logger.error(f"Error during YouTube summarization with Direct Gemini API: {e}", exc_info=True)
-        # Re-raise the exception to be caught by the handler
         raise e
 
 async def summarize_youtube_via_vertex_ai(youtube_link: str, video_id: str, prompt_text: str):
@@ -476,10 +361,6 @@ logger.info("AI and summarization functions defined.")
 
 
 async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_to_message_id: int | None = None):
-    """
-    Sends a message, splitting it into multiple parts if it exceeds Telegram's character limit.
-    Replies to the original message with the first part and returns that first message object.
-    """
     MAX_LENGTH = 4096
     if len(text) <= MAX_LENGTH:
         message = await context.bot.send_message(
@@ -488,47 +369,36 @@ async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, te
             reply_to_message_id=reply_to_message_id
         )
         return message
-
     parts = []
-    # Split the text into chunks, trying to preserve whole lines
     while len(text) > 0:
         if len(text) > MAX_LENGTH:
             part = text[:MAX_LENGTH]
-            # Find the last newline character to avoid cutting mid-sentence
             last_newline = part.rfind('\n')
             if last_newline > 0:
                 part = text[:last_newline]
                 text = text[last_newline + 1:]
             else:
-                # If no newline, just split at the max length
                 part = text[:MAX_LENGTH]
                 text = text[MAX_LENGTH:]
             parts.append(part)
         else:
             parts.append(text)
             break
-
     sent_message = None
     for i, part in enumerate(parts):
-        # Add a part indicator like [1/3] for better user experience
         part_text_with_indicator = f"[{i+1}/{len(parts)}]\n{part}"
-
         if i == 0:
-            # The first part replies to the user's original message
             message = await context.bot.send_message(
                 chat_id=chat_id,
                 text=part_text_with_indicator,
                 reply_to_message_id=reply_to_message_id
             )
-            # We save the first message object to return it for logging purposes
             sent_message = message
         else:
-            # Subsequent parts are sent as regular messages
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=part_text_with_indicator
             )
-
     return sent_message
 
 # --- Telegram Handlers ---
@@ -536,6 +406,25 @@ async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, te
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     await update.message.reply_html(rf"Hi, {user.mention_html()}! I'm ready to work.")
+
+### MODIFIED ###
+# This helper function is now used in multiple places to build the main menu
+async def _build_main_menu_keyboard(query: CallbackQueryHandler | None = None, update: Update | None = None):
+    """Builds and sends/edits the main menu keyboard."""
+    keyboard = [
+        [InlineKeyboardButton("Gemini API (Video)", callback_data='summarize_gemini_api')],
+        [InlineKeyboardButton("Vertex AI (Video)", callback_data='summarize_vertex_ai')],
+        [InlineKeyboardButton("Super Transcript (File)", callback_data='summarize_super_transcript')],
+        [InlineKeyboardButton("Custom Prompts >>", callback_data='custom_prompts_menu')],
+        [InlineKeyboardButton("Cancel", callback_data='cancel_summary')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message_text = 'Choose summarization method for this YouTube video:'
+    if query:
+        await query.edit_message_text(message_text, reply_markup=reply_markup)
+    elif update:
+        await update.message.reply_text(message_text, reply_markup=reply_markup)
 
 @authorized
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
@@ -547,16 +436,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['youtube_link'] = text
         context.user_data['video_id'] = video_id
         context.user_data['original_message_id'] = update.message.message_id
-
-        keyboard = [
-            [InlineKeyboardButton("Gemini API (Video)", callback_data='summarize_gemini_api')],
-            [InlineKeyboardButton("Vertex AI (Video)", callback_data='summarize_vertex_ai')],
-            [InlineKeyboardButton("Super Transcript (File)", callback_data='summarize_super_transcript')],
-            [InlineKeyboardButton("Transcript & Summary (Placeholder)", callback_data='summarize_transcript_placeholder')],
-            [InlineKeyboardButton("Cancel", callback_data='cancel_summary')],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('Choose summarization method for this YouTube video:', reply_markup=reply_markup)
+        
+        await _build_main_menu_keyboard(update=update)
         return CHOOSING_SUMMARY_METHOD
     else:
         await _process_general_query(update, context)
@@ -569,8 +450,20 @@ async def choose_summary_method_callback(update: Update, context: ContextTypes.D
     choice = query.data
     context.user_data['summary_method_choice'] = choice
 
-    if choice in ['summarize_gemini_api', 'summarize_vertex_ai', 'summarize_super_transcript']:
-        # Check prerequisites early
+    ### MODIFIED ###
+    if choice == 'custom_prompts_menu':
+        keyboard = [
+            [InlineKeyboardButton("Magazine Article", callback_data='prompt_magazine')],
+            [InlineKeyboardButton("Textbook Chapter", callback_data='prompt_textbook')],
+            [InlineKeyboardButton("Learning Path", callback_data='prompt_learning_path')],
+            [InlineKeyboardButton("Custom Script", callback_data='prompt_custom_script')],
+            [InlineKeyboardButton("<< Back to Main Menu", callback_data='back_to_main_menu')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text="Choose a custom prompt format:", reply_markup=reply_markup)
+        return CHOOSING_CUSTOM_PROMPT
+
+    elif choice in ['summarize_gemini_api', 'summarize_vertex_ai', 'summarize_super_transcript']:
         if choice in ['summarize_gemini_api', 'summarize_super_transcript'] and not GEMINI_API_KEY:
             await query.edit_message_text(text="Error: GEMINI_API_KEY is not configured for this method.")
             context.user_data.clear()
@@ -583,24 +476,11 @@ async def choose_summary_method_callback(update: Update, context: ContextTypes.D
         language_keyboard = [
             [InlineKeyboardButton("Русский", callback_data='lang_ru')],
             [InlineKeyboardButton("English", callback_data='lang_en')],
-            [InlineKeyboardButton("<< Back to Method", callback_data='back_to_method_choice')],
+            [InlineKeyboardButton("<< Back to Main Menu", callback_data='back_to_main_menu')],
         ]
         reply_markup = InlineKeyboardMarkup(language_keyboard)
         await query.edit_message_text(text="Choose summary language:", reply_markup=reply_markup)
         return CHOOSING_LANGUAGE
-
-    elif choice == 'summarize_transcript_placeholder':
-        await query.edit_message_text(text="Acknowledged: 'Transcript & Summary' method.")
-        placeholder_message = "The 'Transcript & Summary' option is currently a placeholder. No action taken."
-        original_message_id = context.user_data.get('original_message_id')
-        youtube_link = context.user_data.get('youtube_link')
-        if original_message_id and youtube_link:
-            await context.bot.send_message(chat_id=query.message.chat_id, text=placeholder_message, reply_to_message_id=original_message_id)
-            interaction_id = add_interaction(query.from_user.id, query.message.chat_id, original_message_id, youtube_link, REQ_TYPE_YOUTUBE_TRANSCRIPT_PLACEHOLDER)
-            if interaction_id:
-                update_interaction(interaction_id, response_text=placeholder_message, status=STATUS_PLACEHOLDER, youtube_url=youtube_link)
-        context.user_data.clear()
-        return ConversationHandler.END
 
     elif choice == 'cancel_summary':
         await query.edit_message_text(text="Summarization cancelled.")
@@ -610,6 +490,36 @@ async def choose_summary_method_callback(update: Update, context: ContextTypes.D
         await query.edit_message_text(text="Invalid choice.")
         context.user_data.clear()
         return ConversationHandler.END
+
+### NEW ###
+@authorized
+async def choose_custom_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles placeholder actions for the custom prompts submenu."""
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    
+    prompt_name_map = {
+        'prompt_magazine': 'Magazine Article',
+        'prompt_textbook': 'Textbook Chapter',
+        'prompt_learning_path': 'Learning Path',
+        'prompt_custom_script': 'Custom Script'
+    }
+    prompt_name = prompt_name_map.get(choice, 'Selected custom prompt')
+
+    await query.edit_message_text(text=f"Acknowledged: '{prompt_name}' method.")
+    placeholder_message = f"The '{prompt_name}' feature is not yet implemented. No action taken."
+    original_message_id = context.user_data.get('original_message_id')
+    youtube_link = context.user_data.get('youtube_link')
+
+    if original_message_id and youtube_link:
+        await context.bot.send_message(chat_id=query.message.chat_id, text=placeholder_message, reply_to_message_id=original_message_id)
+        interaction_id = add_interaction(query.from_user.id, query.message.chat_id, original_message_id, youtube_link, REQ_TYPE_CUSTOM_PROMPT_PLACEHOLDER)
+        if interaction_id:
+            update_interaction(interaction_id, response_text=placeholder_message, status=STATUS_PLACEHOLDER, youtube_url=youtube_link)
+    
+    context.user_data.clear()
+    return ConversationHandler.END
 
 @authorized
 async def choose_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -679,14 +589,11 @@ async def choose_language_callback(update: Update, context: ContextTypes.DEFAULT
                         caption=f"Here is the Super Transcript for '{video_id}'.",
                         reply_to_message_id=original_message_id
                     )
-                
                 update_interaction(interaction_id_user_request, response_text=f"Successfully generated and sent {filename}", status=STATUS_SUCCESS, youtube_url=youtube_link)
-
             finally:
                 if os.path.exists(filename):
                     os.remove(filename)
                     logger.info(f"Cleaned up temporary file: {filename}")
-
         else:
             bot_summary_message = await send_long_message(context, chat_id=query.message.chat_id, text=ai_content, reply_to_message_id=original_message_id)
             update_interaction(interaction_id_user_request, response_text=ai_content, status=STATUS_SUCCESS, youtube_url=youtube_link)
@@ -702,18 +609,12 @@ async def choose_language_callback(update: Update, context: ContextTypes.DEFAULT
     context.user_data.clear()
     return ConversationHandler.END
 
-async def back_to_method_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+### MODIFIED ###
+async def back_to_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigates back to the main method selection menu."""
     query = update.callback_query
     await query.answer()
-    keyboard = [
-        [InlineKeyboardButton("Gemini API (Video)", callback_data='summarize_gemini_api')],
-        [InlineKeyboardButton("Vertex AI (Video)", callback_data='summarize_vertex_ai')],
-        [InlineKeyboardButton("Super Transcript (File)", callback_data='summarize_super_transcript')],
-        [InlineKeyboardButton("Transcript & Summary (Placeholder)", callback_data='summarize_transcript_placeholder')],
-        [InlineKeyboardButton("Cancel", callback_data='cancel_summary')],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text('Choose summarization method for this YouTube video:', reply_markup=reply_markup)
+    await _build_main_menu_keyboard(query=query)
     return CHOOSING_SUMMARY_METHOD
 
 
@@ -723,7 +624,7 @@ async def handle_reply_to_summary(update: Update, context: ContextTypes.DEFAULT_
     reply_to = update.message.reply_to_message
 
     if reply_to and reply_to.from_user.is_bot:
-        summary_context_text = get_summary_text_from_bot_message(reply_to.message_id, update.message.chat_id, context.bot.id)
+        summary_context_text = get_summary_text_from_bot_message(reply_to.message.chat_id, context.bot.id)
         if summary_context_text:
             interaction_id_user_request = add_interaction(update.effective_user.id, update.message.chat_id, update.message.message_id, text, REQ_TYPE_REPLY_TO_SUMMARY, reply_to_message_id=reply_to.message_id)
             if interaction_id_user_request is None:
@@ -761,9 +662,9 @@ async def cancel_summary_conversation(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text(text="Summarization choice cancelled.")
+        await query.edit_message_text(text="Summarization cancelled.")
     else:
-        await update.message.reply_text("Summarization choice cancelled.")
+        await update.message.reply_text("Summarization cancelled.")
     context.user_data.clear()
     return ConversationHandler.END
 logger.info("Telegram handler functions defined.")
@@ -796,6 +697,7 @@ def main() -> None:
         application.add_error_handler(error_handler)
         logger.info("Error handler added to application.")
 
+        ### MODIFIED ###
         summary_conv_handler = ConversationHandler(
             entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.REPLY, handle_text_message)],
             states={
@@ -803,14 +705,17 @@ def main() -> None:
                     CallbackQueryHandler(choose_summary_method_callback, pattern='^summarize_gemini_api$'),
                     CallbackQueryHandler(choose_summary_method_callback, pattern='^summarize_vertex_ai$'),
                     CallbackQueryHandler(choose_summary_method_callback, pattern='^summarize_super_transcript$'),
-                    CallbackQueryHandler(choose_summary_method_callback, pattern='^summarize_transcript_placeholder$'),
+                    CallbackQueryHandler(choose_summary_method_callback, pattern='^custom_prompts_menu$'),
                     CallbackQueryHandler(cancel_summary_conversation, pattern='^cancel_summary$'),
                 ],
                 CHOOSING_LANGUAGE: [
                     CallbackQueryHandler(choose_language_callback, pattern='^lang_ru$'),
                     CallbackQueryHandler(choose_language_callback, pattern='^lang_en$'),
-                    CallbackQueryHandler(back_to_method_choice_callback, pattern='^back_to_method_choice$'),
-                    CallbackQueryHandler(cancel_summary_conversation, pattern='^cancel_summary$'),
+                    CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
+                ],
+                CHOOSING_CUSTOM_PROMPT: [
+                    CallbackQueryHandler(choose_custom_prompt_callback, pattern='^prompt_'),
+                    CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
                 ],
             },
             fallbacks=[CommandHandler('cancel', cancel_summary_conversation)],
