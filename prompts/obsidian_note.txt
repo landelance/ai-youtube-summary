@@ -10,9 +10,10 @@ Your output MUST be a single Markdown document. Follow these instructions with e
 
 2.  **Summary:** A concise, one-paragraph summary of the video's core message.
 
-3.  **Key Concepts with WikiLinks:**
-    * Break down the main ideas into sections using `###` headings.
-    * For every important noun, concept, technology, or person, you **MUST** create an Obsidian `[[WikiLink]]`. This is the most critical part of the task. For example, "The video discusses [[prompt engineering]] and its use with [[large language models]]."
+3.  **Key Concepts & Contextual External Links**:
+    * Break down the main ideas into sections using ### headings.
+    * For every important noun, concept, technology, or person explicitly mentioned, you MUST create a standard Markdown external link (e.g., [text](URL)). Find a relevant, high-quality resource for the link, such as a Wikipedia article or an official website.
+    * Go beyond the explicitly mentioned terms. You must also infer and link to related, unstated concepts that provide crucial context. For instance, if the text discusses [fishing cats](...) in [wetlands](...), you should also find resources and create links for broader concepts like [apex predators](...), [habitat fragmentation](...), or [conservation biology](...) to create a more comprehensive and well-referenced note. This is the most critical part of the task.
 
 4.  **Actionable Items:**
     * If the video gives advice or steps, list them as a Markdown checklist using `- [ ]`.
