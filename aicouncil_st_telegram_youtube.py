@@ -320,6 +320,10 @@ async def choose_method_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(text="Choose summary language:", reply_markup=reply_markup)
     return CHOOSING_LANGUAGE
 
+### start of deletioon
+
+# [Previous imports and code unchanged]
+
 @authorized
 async def process_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -334,8 +338,13 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text("Error: Could not find a valid prompt for the selected action.")
         return ConversationHandler.END
 
-    language_name = LANGUAGE_NAME_MAP.get(chosen_language_code, "selected")
+    language_name = LANGUAGE_NAME_MAP.get(chosen_language_code)
+    if not language_name:
+        logger.warning(f"Unknown language code: {chosen_language_code}. Defaulting to English.")
+        language_name = "английском"
+    
     prompt_text = prompt_template.format(language_name_locative=language_name)
+    logger.info(f"Formatted prompt: {prompt_text}")
     
     await query.edit_message_text(f"Processing '{method.replace('_', ' ').title()}' in {language_name}... This may take a moment.")
 
@@ -346,6 +355,7 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
 
     try:
         ai_content = await process_video_with_gemini(user_data['youtube_link'], user_data['video_id'], prompt_text)
+        logger.info(f"Gemini API response: {ai_content[:500]}...")  # Log first 500 chars
         
         # Always generate a file for the response
         filename = f"{user_data['video_id']}_{method}.txt"
@@ -378,19 +388,9 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
     user_data.clear()
     return ConversationHandler.END
 
-async def back_to_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    await _build_main_menu_keyboard(query=query)
-    return CHOOSING_METHOD
+# [Rest of the script unchanged]
 
-async def cancel_summary_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    if query:
-        await query.answer()
-        await query.edit_message_text(text="Summarization cancelled.")
-    context.user_data.clear()
-    return ConversationHandler.END
+### end of deletion
 
 def main() -> None:
     application = Application.builder().token(AI_COUNCIL_TELEGRAM_BOT_TOKEN).build()
