@@ -1,0 +1,16 @@
+# Virtual Environment
+.venv/
+
+# Environment variables
+.env
+
+# Database files
+*.db
+*.db-journal
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Log files
+*.log
