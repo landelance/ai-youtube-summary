@@ -84,8 +84,8 @@ STATUS_SUCCESS = "success"
 STATUS_ERROR_LLM = "error_llm"
 STATUS_ERROR_YOUTUBE = "error_youtube"
 
-CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-1.5-flash")
-GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-1.5-flash")
+CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-2.5-flash")
+GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-2.5-flash")
 
 # Conversation states
 CHOOSING_METHOD, CHOOSING_LANGUAGE = range(2)
