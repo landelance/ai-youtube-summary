@@ -5,16 +5,14 @@ import logging
 import re
 from datetime import datetime
 from functools import wraps
-import json
 import asyncio
-
 
 import google.generativeai as genai
 try:
     from google.ai import generativelanguage as glm
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
 except ImportError:
-    print("CRITICAL: Failed to import google.ai.generativelanguage (glm). Ensure 'google-ai-generativelanguage' is installed.")
+    logger.critical("Failed to import google.ai.generativelanguage (glm). Ensure 'google-ai-generativelanguage' is installed.")
     glm = None
 
 from dotenv import load_dotenv
@@ -44,7 +42,6 @@ logger.info("dotenv loaded.")
 AI_COUNCIL_TELEGRAM_BOT_TOKEN = os.getenv("AI_COUNCIL_TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-### MODIFIED ###
 # Load a comma-separated string of user IDs and parse it into a list of integers.
 AUTHORIZED_USER_IDS_STR = os.getenv("AUTHORIZED_USER_IDS", "")
 AUTHORIZED_USER_IDS = []
@@ -54,14 +51,13 @@ if AUTHORIZED_USER_IDS_STR:
         logger.info(f"Loaded {len(AUTHORIZED_USER_IDS)} authorized user IDs.")
     except ValueError:
         logger.critical("CRITICAL ERROR: AUTHORIZED_USER_IDS in .env file contains non-integer values. Please fix it. Exiting.")
-        exit()
+        exit(1)
 else:
     logger.warning("WARNING: AUTHORIZED_USER_IDS is not set in the .env file. The bot will not respond to any user.")
 
-
 if not all([AI_COUNCIL_TELEGRAM_BOT_TOKEN, AUTHORIZED_USER_IDS]):
     logger.critical("CRITICAL ERROR: Missing AI_COUNCIL_TELEGRAM_BOT_TOKEN or AUTHORIZED_USER_IDS is not set correctly. Exiting.")
-    exit()
+    exit(1)
 
 if GEMINI_API_KEY:
     try:
@@ -102,9 +98,14 @@ def load_prompt(filename: str) -> str | None:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         prompt_path = os.path.join(base_dir, 'prompts', filename)
         with open(prompt_path, 'r', encoding='utf-8') as f:
-            return f.read()
+            content = f.read()
+            logger.info(f"Successfully loaded prompt: {filename}")
+            return content
     except FileNotFoundError:
         logger.error(f"CRITICAL: Prompt file not found at {prompt_path}")
+        return None
+    except Exception as e:
+        logger.error(f"Error loading prompt {filename}: {e}", exc_info=True)
         return None
 
 # --- Load Prompts from Files ---
@@ -120,18 +121,16 @@ PROMPTS = {
 
 # Critical check to ensure all prompts were loaded
 if not all(PROMPTS.values()):
-    logger.critical("One or more essential prompt files could not be loaded from the 'prompts' folder. Exiting.")
-    exit()
+    missing_prompts = [key for key, value in PROMPTS.items() if value is None]
+    logger.critical(f"One or more essential prompt files could not be loaded: {missing_prompts}. Exiting.")
+    exit(1)
 
 logger.info("All essential prompts loaded successfully.")
-
 
 # --- Authorization Decorator & DB Functions ---
 def authorized(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        ### MODIFIED ###
-        # Check if the user's ID is in the list of authorized IDs
         if update.effective_user.id not in AUTHORIZED_USER_IDS:
             logger.warning(f"Unauthorized access from user_id: {update.effective_user.id}")
             await update.message.reply_text("Sorry, you do not have access to this bot.")
@@ -173,7 +172,7 @@ def add_interaction(user_id, chat_id, message_id, request_text, request_type, re
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO interactions (user_id, chat_id, message_id, reply_to_message_id, request_timestamp, request_text, request_type, processing_status)
-                VALUES ?, ?, ?, ?, ?, ?, ?, ?
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (user_id, chat_id, message_id, reply_to_id, timestamp, request_text, request_type, STATUS_PENDING))
             conn.commit()
             return cursor.lastrowid
@@ -196,7 +195,6 @@ def update_interaction(interaction_id, response_text=None, status=STATUS_SUCCESS
             conn.commit()
     except sqlite3.Error as e:
         logger.error(f"Error updating record (ID: {interaction_id}) in DB: {e}", exc_info=True)
-
 
 # --- AI Integration & Features ---
 def extract_video_id(url):
@@ -227,13 +225,12 @@ async def process_video_with_gemini(youtube_link: str, video_id: str, prompt_tex
             logger.warning(f"response.text failed. Raw response: {response}")
             if response.prompt_feedback and response.prompt_feedback.block_reason == 'SAFETY':
                 if response.candidates and response.candidates[0].finish_reason == 4:
-                     raise ValueError("Content blocked by API safety filters due to potential recitation of copyrighted material.")
+                    raise ValueError("Content blocked by API safety filters due to potential recitation of copyrighted material.")
                 raise ValueError("The API response was blocked by safety filters.")
             raise ValueError("The API returned an invalid or empty response.")
     except Exception as e:
         logger.error(f"Error during video processing with Gemini API: {e}", exc_info=True)
         raise e
-
 
 async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_to_message_id: int | None = None):
     MAX_LENGTH = 4096
@@ -259,7 +256,6 @@ async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, te
         part_text_with_indicator = f"[{i+1}/{len(parts)}]\n{part}"
         reply_id = reply_to_message_id if i == 0 else None
         await context.bot.send_message(chat_id=chat_id, text=part_text_with_indicator, reply_to_message_id=reply_id)
-
 
 # --- Telegram Handlers ---
 @authorized
@@ -320,10 +316,6 @@ async def choose_method_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(text="Choose summary language:", reply_markup=reply_markup)
     return CHOOSING_LANGUAGE
 
-### start of deletioon
-
-# [Previous imports and code unchanged]
-
 @authorized
 async def process_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -343,8 +335,14 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
         logger.warning(f"Unknown language code: {chosen_language_code}. Defaulting to English.")
         language_name = "английском"
     
-    prompt_text = prompt_template.format(language_name_locative=language_name)
-    logger.info(f"Formatted prompt: {prompt_text}")
+    # Format the prompt, and ensure language instruction is included
+    try:
+        prompt_text = prompt_template.format(language_name_locative=language_name)
+    except KeyError:
+        logger.warning(f"Prompt for {method} lacks language placeholder. Prepending language instruction.")
+        prompt_text = f"Generate all content in {language_name} language.\n\n{prompt_template}"
+    
+    logger.info(f"Formatted prompt: {prompt_text[:500]}...")
     
     await query.edit_message_text(f"Processing '{method.replace('_', ' ').title()}' in {language_name}... This may take a moment.")
 
@@ -355,7 +353,7 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
 
     try:
         ai_content = await process_video_with_gemini(user_data['youtube_link'], user_data['video_id'], prompt_text)
-        logger.info(f"Gemini API response: {ai_content[:500]}...")  # Log first 500 chars
+        logger.info(f"Gemini API response: {ai_content[:500]}...")
         
         # Always generate a file for the response
         filename = f"{user_data['video_id']}_{method}.txt"
@@ -388,36 +386,54 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
     user_data.clear()
     return ConversationHandler.END
 
-# [Rest of the script unchanged]
+async def back_to_main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await _build_main_menu_keyboard(query=query)
+    return CHOOSING_METHOD
 
-### end of deletion
+async def cancel_summary_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text(text="Summarization cancelled.")
+    context.user_data.clear()
+    return ConversationHandler.END
 
 def main() -> None:
-    application = Application.builder().token(AI_COUNCIL_TELEGRAM_BOT_TOKEN).build()
+    try:
+        application = Application.builder().token(AI_COUNCIL_TELEGRAM_BOT_TOKEN).build()
 
-    summary_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)],
-        states={
-            CHOOSING_METHOD: [
-                CallbackQueryHandler(choose_method_callback, pattern='^method_'),
-                CallbackQueryHandler(choose_method_callback, pattern='^custom_prompts_menu$'),
-                CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
-            ],
-            CHOOSING_LANGUAGE: [
-                CallbackQueryHandler(process_request_callback, pattern='^lang_'),
-                CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
-            ],
-        },
-        fallbacks=[CommandHandler('cancel', cancel_summary_conversation), CallbackQueryHandler(cancel_summary_conversation, pattern='^cancel_summary$')],
-        per_message=False
-    )
+        summary_conv_handler = ConversationHandler(
+            entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)],
+            states={
+                CHOOSING_METHOD: [
+                    CallbackQueryHandler(choose_method_callback, pattern='^method_'),
+                    CallbackQueryHandler(choose_method_callback, pattern='^custom_prompts_menu$'),
+                    CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
+                ],
+                CHOOSING_LANGUAGE: [
+                    CallbackQueryHandler(process_request_callback, pattern='^lang_'),
+                    CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
+                ],
+            },
+            fallbacks=[CommandHandler('cancel', cancel_summary_conversation), CallbackQueryHandler(cancel_summary_conversation, pattern='^cancel_summary$')],
+            per_message=False
+        )
 
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(summary_conv_handler)
-    
-    logger.info("Starting bot polling...")
-    application.run_polling()
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(summary_conv_handler)
+        
+        logger.info("Starting bot polling...")
+        application.run_polling()
+    except Exception as e:
+        logger.critical(f"Failed to start bot: {e}", exc_info=True)
+        raise
 
 if __name__ == '__main__':
-    init_db()
-    main()
+    try:
+        init_db()
+        main()
+    except Exception as e:
+        logger.critical(f"Startup error: {e}", exc_info=True)
+        exit(1)
