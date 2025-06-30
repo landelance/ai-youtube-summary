@@ -43,10 +43,24 @@ logger.info("dotenv loaded.")
 
 AI_COUNCIL_TELEGRAM_BOT_TOKEN = os.getenv("AI_COUNCIL_TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-AUTHORIZED_USER_ID = int(os.getenv("AUTHORIZED_USER_ID", "0"))
 
-if not all([AI_COUNCIL_TELEGRAM_BOT_TOKEN, AUTHORIZED_USER_ID != 0]):
-    logger.critical("CRITICAL ERROR: Missing AI_COUNCIL_TELEGRAM_BOT_TOKEN or AUTHORIZED_USER_ID is not set correctly. Exiting.")
+### MODIFIED ###
+# Load a comma-separated string of user IDs and parse it into a list of integers.
+AUTHORIZED_USER_IDS_STR = os.getenv("AUTHORIZED_USER_IDS", "")
+AUTHORIZED_USER_IDS = []
+if AUTHORIZED_USER_IDS_STR:
+    try:
+        AUTHORIZED_USER_IDS = [int(user_id.strip()) for user_id in AUTHORIZED_USER_IDS_STR.split(',')]
+        logger.info(f"Loaded {len(AUTHORIZED_USER_IDS)} authorized user IDs.")
+    except ValueError:
+        logger.critical("CRITICAL ERROR: AUTHORIZED_USER_IDS in .env file contains non-integer values. Please fix it. Exiting.")
+        exit()
+else:
+    logger.warning("WARNING: AUTHORIZED_USER_IDS is not set in the .env file. The bot will not respond to any user.")
+
+
+if not all([AI_COUNCIL_TELEGRAM_BOT_TOKEN, AUTHORIZED_USER_IDS]):
+    logger.critical("CRITICAL ERROR: Missing AI_COUNCIL_TELEGRAM_BOT_TOKEN or AUTHORIZED_USER_IDS is not set correctly. Exiting.")
     exit()
 
 if GEMINI_API_KEY:
@@ -56,28 +70,25 @@ if GEMINI_API_KEY:
     except Exception as e:
         logger.error(f"Failed to configure google-generativeai with GEMINI_API_KEY: {e}.")
 else:
-    logger.warning("GEMINI_API_KEY not set. Direct Gemini API and Transcript+Gemini summarization methods will be impacted.")
+    logger.warning("GEMINI_API_KEY not set. Bot functionality will be severely limited.")
 
 logger.info("Environment variable checks complete.")
 
 # --- Models & Constants ---
 DB_NAME = "telegram_bot.db"
 REQ_TYPE_GENERAL = "general_query"
-REQ_TYPE_YOUTUBE_GEMINI_API = "youtube_summary_gemini_api"
-REQ_TYPE_YOUTUBE_SUPER_TRANSCRIPT = "youtube_super_transcript"
-REQ_TYPE_CUSTOM_PROMPT = "custom_prompt"
+REQ_TYPE_YOUTUBE_ANALYSIS = "youtube_analysis"
 REQ_TYPE_REPLY_TO_SUMMARY = "reply_to_summary"
 STATUS_PENDING = "pending"
 STATUS_SUCCESS = "success"
 STATUS_ERROR_LLM = "error_llm"
 STATUS_ERROR_YOUTUBE = "error_youtube"
-STATUS_ERROR_GENERAL = "error_general"
 
-CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-2.5-flash-lite-preview-06-17")
-GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-2.5-flash-lite-preview-06-17")
+CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-1.5-flash")
+GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-1.5-flash")
 
 # Conversation states
-CHOOSING_SUMMARY_METHOD, CHOOSING_LANGUAGE, CHOOSING_CUSTOM_PROMPT, PROCESSING_SUMMARY = range(4)
+CHOOSING_METHOD, CHOOSING_LANGUAGE = range(2)
 
 LANGUAGE_NAME_MAP = {
     "ru": "русском",
@@ -119,7 +130,9 @@ logger.info("All essential prompts loaded successfully.")
 def authorized(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        if update.effective_user.id != AUTHORIZED_USER_ID:
+        ### MODIFIED ###
+        # Check if the user's ID is in the list of authorized IDs
+        if update.effective_user.id not in AUTHORIZED_USER_IDS:
             logger.warning(f"Unauthorized access from user_id: {update.effective_user.id}")
             await update.message.reply_text("Sorry, you do not have access to this bot.")
             if isinstance(context, ConversationHandler):
@@ -255,8 +268,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def _build_main_menu_keyboard(query: CallbackQueryHandler | None = None, update: Update | None = None):
     keyboard = [
-        [InlineKeyboardButton("Detailed Summary", callback_data='summarize_detailed_summary')],
-        [InlineKeyboardButton("Super Transcript (File)", callback_data='summarize_super_transcript')],
+        [InlineKeyboardButton("Detailed Summary", callback_data='method_detailed_summary')],
+        [InlineKeyboardButton("Super Transcript (File)", callback_data='method_super_transcript')],
         [InlineKeyboardButton("Custom Formats >>", callback_data='custom_prompts_menu')],
         [InlineKeyboardButton("Cancel", callback_data='cancel_summary')],
     ]
@@ -275,50 +288,33 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['video_id'] = video_id
         context.user_data['original_message_id'] = update.message.message_id
         await _build_main_menu_keyboard(update=update)
-        return CHOOSING_SUMMARY_METHOD
+        return CHOOSING_METHOD
     await update.message.reply_text("Please send me a valid YouTube link.")
     return ConversationHandler.END
 
 @authorized
-async def choose_summary_method_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def choose_method_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     choice = query.data
-    
+
     if choice == 'custom_prompts_menu':
         keyboard = [
-            [InlineKeyboardButton("Magazine Article", callback_data='prompt_magazine_article')],
-            [InlineKeyboardButton("Textbook Chapter", callback_data='prompt_textbook_chapter')],
-            [InlineKeyboardButton("Step-by-Step Guide", callback_data='prompt_step_by_step_guide')],
-            [InlineKeyboardButton("Obsidian MD Note (File)", callback_data='prompt_obsidian_note')],
+            [InlineKeyboardButton("Magazine Article", callback_data='method_magazine_article')],
+            [InlineKeyboardButton("Textbook Chapter", callback_data='method_textbook_chapter')],
+            [InlineKeyboardButton("Step-by-Step Guide", callback_data='method_step_by_step_guide')],
+            [InlineKeyboardButton("Obsidian MD Note (File)", callback_data='method_obsidian_note')],
             [InlineKeyboardButton("<< Back to Main Menu", callback_data='back_to_main_menu')],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text="Choose a custom prompt format:", reply_markup=reply_markup)
-        return CHOOSING_CUSTOM_PROMPT
+        return CHOOSING_METHOD
 
-    # All main menu items that lead to language selection
-    context.user_data['summary_method_choice'] = choice.replace('summarize_', '')
+    context.user_data['method_choice'] = choice.replace('method_', '')
     language_keyboard = [
         [InlineKeyboardButton("Русский", callback_data='lang_ru')],
         [InlineKeyboardButton("English", callback_data='lang_en')],
         [InlineKeyboardButton("<< Back to Main Menu", callback_data='back_to_main_menu')],
-    ]
-    reply_markup = InlineKeyboardMarkup(language_keyboard)
-    await query.edit_message_text(text="Choose summary language:", reply_markup=reply_markup)
-    return CHOOSING_LANGUAGE
-
-@authorized
-async def choose_custom_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    choice = query.data.replace('prompt_', '')
-    context.user_data['summary_method_choice'] = choice
-
-    language_keyboard = [
-        [InlineKeyboardButton("Русский", callback_data='lang_ru')],
-        [InlineKeyboardButton("English", callback_data='lang_en')],
-        [InlineKeyboardButton("<< Back to Custom Prompts", callback_data='back_to_custom_menu')],
     ]
     reply_markup = InlineKeyboardMarkup(language_keyboard)
     await query.edit_message_text(text="Choose summary language:", reply_markup=reply_markup)
@@ -331,7 +327,7 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
     chosen_language_code = query.data.split('_')[1]
 
     user_data = context.user_data
-    method = user_data.get('summary_method_choice')
+    method = user_data.get('method_choice')
     
     prompt_template = PROMPTS.get(method)
     if not prompt_template:
@@ -345,7 +341,7 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
 
     interaction_id = add_interaction(
         query.from_user.id, query.message.chat_id, user_data['original_message_id'],
-        user_data['youtube_link'], f"custom_{method}"
+        user_data['youtube_link'], f"youtube_{method}"
     )
 
     try:
@@ -384,21 +380,7 @@ async def back_to_main_menu_callback(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     await _build_main_menu_keyboard(query=query)
-    return CHOOSING_SUMMARY_METHOD
-
-async def back_to_custom_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    keyboard = [
-        [InlineKeyboardButton("Magazine Article", callback_data='prompt_magazine_article')],
-        [InlineKeyboardButton("Textbook Chapter", callback_data='prompt_textbook_chapter')],
-        [InlineKeyboardButton("Step-by-Step Guide", callback_data='prompt_step_by_step_guide')],
-        [InlineKeyboardButton("Obsidian MD Note (File)", callback_data='prompt_obsidian_note')],
-        [InlineKeyboardButton("<< Back to Main Menu", callback_data='back_to_main_menu')],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text="Choose a custom prompt format:", reply_markup=reply_markup)
-    return CHOOSING_CUSTOM_PROMPT
+    return CHOOSING_METHOD
 
 async def cancel_summary_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -414,21 +396,18 @@ def main() -> None:
     summary_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)],
         states={
-            CHOOSING_SUMMARY_METHOD: [
-                CallbackQueryHandler(choose_summary_method_callback, pattern='^summarize_'),
-                CallbackQueryHandler(choose_summary_method_callback, pattern='^custom_prompts_menu$'),
-            ],
-            CHOOSING_CUSTOM_PROMPT: [
-                CallbackQueryHandler(choose_custom_prompt_callback, pattern='^prompt_'),
+            CHOOSING_METHOD: [
+                CallbackQueryHandler(choose_method_callback, pattern='^method_'),
+                CallbackQueryHandler(choose_method_callback, pattern='^custom_prompts_menu$'),
                 CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
             ],
             CHOOSING_LANGUAGE: [
                 CallbackQueryHandler(process_request_callback, pattern='^lang_'),
                 CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
-                CallbackQueryHandler(back_to_custom_menu_callback, pattern='^back_to_custom_menu$'),
             ],
         },
-        fallbacks=[CommandHandler('cancel', cancel_summary_conversation)],
+        fallbacks=[CommandHandler('cancel', cancel_summary_conversation), CallbackQueryHandler(cancel_summary_conversation, pattern='^cancel_summary$')],
+        per_message=False
     )
 
     application.add_handler(CommandHandler("start", start_command))
