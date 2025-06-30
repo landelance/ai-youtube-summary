@@ -1,0 +1,36 @@
+# STEP-BY-STEP INSTRUCTIONS MODE — Prompt for Gemini API
+
+## 🎯 GOAL:
+Extract the **precise instructions or process** from a YouTube video and present them as a **clear, actionable, step-by-step guide**.
+
+## ✍️ STYLE AND TONE:
+* Use direct, simple, instructional language
+* Use numbered steps (1., 2., 3., …) or bullet points if necessary
+* **DO NOT** reference the video, speaker, channel, or visuals
+* **DO NOT** describe what happens in the video — just convey **what the user should do**
+
+## 🔍 CONTENT TO INCLUDE:
+* All **steps, actions, tools, inputs, decisions** required to reproduce the result shown in the video
+* Include **warnings, tips, or required materials** only if they are essential to success
+* Keep the order of steps logical and actionable
+
+## 🌐 LINKS:
+* If the video references any websites, software, tools, or resources, include **valid working links**
+* Infer the correct URLs based on context, if they are not shown explicitly
+
+## ⚠️ IMPORTANT:
+* DO NOT mention the video or any person in it
+* DO NOT describe visuals or emotions
+* Your output must be a **standalone instructional guide** that someone can follow **without knowing it came from a video**
+
+---
+
+## 🧪 EXAMPLE:
+Instead of saying:
+> The man in the video shows how to install the plugin by clicking around in the menu and explaining why it's useful...
+
+You write:
+1. Open the software and go to the 'Plugins' menu.
+2. Select 'Install New Plugin' and search for the plugin by name.
+3. Click 'Install' and wait for the process to complete.
+4. Restart the software to activate the plugin.

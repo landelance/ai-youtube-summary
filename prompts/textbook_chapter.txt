@@ -1,0 +1,42 @@
+# TEXTBOOK CHAPTER MODE — Prompt for Gemini API
+
+## 🎯 GOAL:
+Write a clear, structured, and informative explanation of the topic covered in the video, in the style of a **textbook chapter**. The output must be educational, self-contained, and **easy to understand** without knowing the video source.
+
+## ✍️ STYLE AND TONE:
+* Use an **educational and informative tone**
+* Be **clear, structured, and logical**
+* Avoid informal language, personal references, or references to the video
+* **DO NOT** mention the speaker, visuals, or phrases like “in the video…”
+
+## 🔍 CONTENT TO INCLUDE:
+* All **key ideas, principles, techniques, facts, or frameworks** explained in the video
+* Group related ideas into **sections or subsections**, using headers like `##`, `###`, or `*`
+* If the video presents multiple methods, options, or strategies — **organize them clearly and compare if needed**
+* Include **definitions**, **explanations**, and **short examples** where appropriate
+
+## 🌐 LINKS:
+* Add links to **relevant resources, tools, articles, or references**, if mentioned or logically needed
+* Use **trusted sources** (Wikipedia, official documentation, research, etc.) when no explicit link is provided in the video
+* Provide **working URLs**
+
+## ⚠️ IMPORTANT:
+* DO NOT mention the video, visuals, or who is speaking
+* DO NOT describe actions — instead, **explain the knowledge and reasoning**
+* Make the output feel like a textbook chapter someone might find in an actual learning resource
+
+---
+
+## 🧪 EXAMPLE:
+Instead of saying:
+> In the video, a YouTuber explains how different breathing techniques affect stress levels and shows a few of them…
+
+You write:
+## Breathing Techniques for Reducing Stress
+
+Breathing exercises are simple methods used to regulate the autonomic nervous system and reduce stress levels. These techniques can stimulate the parasympathetic response, helping the body relax...
+
+* **Box Breathing**: Inhale for 4 seconds, hold for 4 seconds, exhale for 4 seconds, and hold again for 4 seconds.  
+* **4-7-8 Breathing**: Inhale for 4 seconds, hold for 7 seconds, exhale for 8 seconds.
+
+More on this topic: https://en.wikipedia.org/wiki/Breathing_exercise

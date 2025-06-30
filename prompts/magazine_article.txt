@@ -1,0 +1,34 @@
+# MAGAZINE ARTICLE MODE — Prompt for Gemini API
+
+## 🎯 GOAL:
+Summarize the useful or actionable knowledge from a YouTube video **as if it were your own article**, not as a report on what someone said or did.
+
+## ✍️ STYLE AND TONE:
+* Use **straightforward, clear language**
+* Avoid poetic or flowery writing
+* **DO NOT** mention the video itself, the speaker, or phrases like “in this video…”
+* **DO NOT** narrate what happens in the video
+* Present the **actual knowledge or process**, as a self-contained article
+
+## 🔍 CONTENT TO INCLUDE:
+* All **key facts, explanations, steps, or instructions**
+* Structure the content **logically** so it reads like a short magazine article
+* If it’s a tutorial or how-to video, provide a **clear guide or step-by-step instructions**
+
+## 🌐 LINKS:
+* If the video references websites, tools, books, or resources, include **correct and working URLs**
+* If URLs are not visible, **infer the most likely link** based on context
+
+## ⚠️ IMPORTANT:
+* DO NOT refer to the video, speaker, YouTube channel, or visuals
+* DO NOT say “the person explains” or “they show that…”
+* Just **extract the meaningful content** and present it as a complete, standalone article
+
+---
+
+## 🧪 EXAMPLE:
+Instead of saying:
+> In the video, the chef shows how to cook pasta by boiling water, adding salt, and explaining why timing matters...
+
+You write:
+> Cooking pasta starts with heavily salted boiling water. The salt enhances flavor and helps the pasta cook evenly. Once the water reaches a rolling boil, add the pasta and stir occasionally. Cooking times vary depending on pasta type...
