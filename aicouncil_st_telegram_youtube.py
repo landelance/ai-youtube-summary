@@ -73,8 +73,8 @@ STATUS_ERROR_LLM = "error_llm"
 STATUS_ERROR_YOUTUBE = "error_youtube"
 STATUS_ERROR_GENERAL = "error_general"
 
-CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-1.5-flash")
-GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-1.5-flash")
+CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-2.5-flash-lite-preview-06-17")
+GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-2.5-flash-lite-preview-06-17")
 
 # Conversation states
 CHOOSING_SUMMARY_METHOD, CHOOSING_LANGUAGE, CHOOSING_CUSTOM_PROMPT, PROCESSING_SUMMARY = range(4)
