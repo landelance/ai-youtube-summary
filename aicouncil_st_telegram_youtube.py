@@ -173,7 +173,7 @@ def add_interaction(user_id, chat_id, message_id, request_text, request_type, re
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO interactions (user_id, chat_id, message_id, reply_to_message_id, request_timestamp, request_text, request_type, processing_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES ?, ?, ?, ?, ?, ?, ?, ?
             ''', (user_id, chat_id, message_id, reply_to_id, timestamp, request_text, request_type, STATUS_PENDING))
             conn.commit()
             return cursor.lastrowid
@@ -347,25 +347,27 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
     try:
         ai_content = await process_video_with_gemini(user_data['youtube_link'], user_data['video_id'], prompt_text)
         
-        is_file_output = method in ['super_transcript', 'obsidian_note']
-        if is_file_output:
-            filename = f"{user_data['video_id']}_{method}.md"
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(ai_content)
-                with open(filename, 'rb') as f:
-                    await context.bot.send_document(
-                        chat_id=query.message.chat_id, document=f, filename=filename,
-                        caption=f"Here is your '{method.replace('_', ' ').title()}' file.",
-                        reply_to_message_id=user_data['original_message_id']
-                    )
-                update_interaction(interaction_id, response_text=f"Sent file: {filename}", status=STATUS_SUCCESS)
-            finally:
-                if os.path.exists(filename):
-                    os.remove(filename)
-        else:
-            await send_long_message(context, query.message.chat_id, ai_content, user_data['original_message_id'])
+        # Always generate a file for the response
+        filename = f"{user_data['video_id']}_{method}.txt"
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(ai_content)
+            with open(filename, 'rb') as f:
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id, 
+                    document=f, 
+                    filename=filename,
+                    caption=f"Here is your '{method.replace('_', ' ').title()}' file.",
+                    reply_to_message_id=user_data['original_message_id']
+                )
+            # For non-file-output methods, also send the response as a text message
+            if method not in ['super_transcript', 'obsidian_note']:
+                await send_long_message(context, query.message.chat_id, ai_content, user_data['original_message_id'])
             update_interaction(interaction_id, response_text=ai_content, status=STATUS_SUCCESS)
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+                logger.info(f"Temporary file {filename} deleted.")
 
     except Exception as e:
         logger.error(f"Error during processing for method '{method}': {e}", exc_info=True)
