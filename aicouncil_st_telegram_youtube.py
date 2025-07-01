@@ -12,7 +12,8 @@ try:
     from google.ai import generativelanguage as glm
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
 except ImportError:
-    logger.critical("Failed to import google.ai.generativelanguage (glm). Ensure 'google-ai-generativelanguage' is installed.")
+    # This is a fallback for older versions, assuming logger is configured later
+    logging.critical("Failed to import google.ai.generativelanguage (glm). Ensure 'google-ai-generativelanguage' is installed.")
     glm = None
 
 from dotenv import load_dotenv
@@ -84,7 +85,7 @@ CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-1.5-flash")
 GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-1.5-flash")
 
 # Conversation states
-CHOOSING_METHOD, CHOOSING_LANGUAGE, CHOOSING_EXPERIMENTAL = range(3) ### MODIFIED ### Added new state
+CHOOSING_METHOD, CHOOSING_LANGUAGE, CHOOSING_EXPERIMENTAL = range(3)
 
 LANGUAGE_NAME_MAP = {
     "ru": "русском",
@@ -134,13 +135,11 @@ def authorized(func):
         user = update.effective_user
         if not user or user.id not in AUTHORIZED_USER_IDS:
             logger.warning(f"Unauthorized access from user_id: {user.id if user else 'Unknown'}")
-            # Check if called from a message or a callback query
             if update.message:
                 await update.message.reply_text("Sorry, you do not have access to this bot.")
             elif update.callback_query:
                 await update.callback_query.answer("Sorry, you do not have access to this bot.", show_alert=True)
-
-            if 'conversation' in str(func): # A simple check if it's part of a conversation
+            if 'conversation' in str(func):
                  return ConversationHandler.END
             return
         return await func(update, context, *args, **kwargs)
@@ -274,7 +273,6 @@ async def _build_main_menu_keyboard(query: CallbackQueryHandler | None = None, u
         [InlineKeyboardButton("Detailed Summary", callback_data='method_detailed_summary')],
         [InlineKeyboardButton("Super Transcript (File)", callback_data='method_super_transcript')],
         [InlineKeyboardButton("Custom Formats >>", callback_data='custom_prompts_menu')],
-        ### ADDED ### New button for the experimental menu
         [InlineKeyboardButton("Experimental Processes >>", callback_data='experimental_menu')],
         [InlineKeyboardButton("Cancel", callback_data='cancel_summary')],
     ]
@@ -297,7 +295,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Please send me a valid YouTube link.")
     return ConversationHandler.END
 
-### ADDED ### Placeholder handler for experimental features
 @authorized
 async def placeholder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -307,7 +304,6 @@ async def placeholder_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.clear()
     return ConversationHandler.END
 
-### ADDED ### Handler to show the experimental menu
 @authorized
 async def experimental_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -319,7 +315,7 @@ async def experimental_menu_callback(update: Update, context: ContextTypes.DEFAU
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text="Choose an experimental process:", reply_markup=reply_markup)
-    return CHOOSING_METHOD # Reuse the same state
+    return CHOOSING_METHOD
 
 @authorized
 async def choose_method_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -354,6 +350,8 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     chosen_language_code = query.data.split('_')[1]
+    ### ADDED LOGGING ###
+    logger.info(f"--- LANGUAGE DEBUG: Callback received, chosen_language_code: '{chosen_language_code}'")
 
     user_data = context.user_data
     method = user_data.get('method_choice')
@@ -364,23 +362,20 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
         return ConversationHandler.END
 
     language_name = LANGUAGE_NAME_MAP.get(chosen_language_code)
+    ### ADDED LOGGING ###
+    logger.info(f"--- LANGUAGE DEBUG: Mapped language_name: '{language_name}'")
     if not language_name:
         logger.warning(f"Unknown language code: {chosen_language_code}. Defaulting to English.")
         language_name = "английском"
     
-    ### MODIFIED ### Language fix logic
-    # This logic ensures that even if a prompt template doesn't have a placeholder for language,
-    # the instruction to use a specific language is prepended to the prompt.
     try:
-        # Try to format, assuming the placeholder exists
         prompt_text = prompt_template.format(language_name_locative=language_name)
     except KeyError:
-        # If the placeholder is missing, prepend the language instruction manually.
-        # This fixes the bug for custom prompts that don't have the placeholder.
-        logger.warning(f"Prompt for '{method}' lacks a language placeholder. Prepending language instruction.")
+        logger.warning(f"Prompt for '{method}' lacks a language placeholder. Prepending language instruction manually.")
         prompt_text = f"Generate all content in {language_name} language.\n\n{prompt_template}"
     
-    logger.info(f"Formatted prompt: {prompt_text[:500]}...")
+    ### ADDED LOGGING ###
+    logger.info(f"--- LANGUAGE DEBUG: Final prompt being sent to AI (first 700 chars): {prompt_text[:700]}...")
     
     await query.edit_message_text(f"Processing '{method.replace('_', ' ').title()}' in {language_name}... This may take a moment.")
 
@@ -391,9 +386,8 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
 
     try:
         ai_content = await process_video_with_gemini(user_data['youtube_link'], user_data['video_id'], prompt_text)
-        logger.info(f"Gemini API response: {ai_content[:500]}...")
+        logger.info(f"Gemini API response (first 500 chars): {ai_content[:500]}...")
         
-        # Always generate a file for the response
         filename = f"{user_data['video_id']}_{method}.txt"
         try:
             with open(filename, 'w', encoding='utf-8') as f:
@@ -406,7 +400,6 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
                     caption=f"Here is your '{method.replace('_', ' ').title()}' file.",
                     reply_to_message_id=user_data['original_message_id']
                 )
-            # For non-file-output methods, also send the response as a text message
             if method not in ['super_transcript', 'obsidian_note']:
                 await send_long_message(context, query.message.chat_id, ai_content, user_data['original_message_id'])
             update_interaction(interaction_id, response_text=ai_content, status=STATUS_SUCCESS)
@@ -442,7 +435,6 @@ def main() -> None:
     try:
         application = Application.builder().token(AI_COUNCIL_TELEGRAM_BOT_TOKEN).build()
 
-        ### MODIFIED ### Updated ConversationHandler to include new menus and states
         summary_conv_handler = ConversationHandler(
             entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)],
             states={
