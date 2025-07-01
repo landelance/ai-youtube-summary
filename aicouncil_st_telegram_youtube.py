@@ -12,7 +12,6 @@ try:
     from google.ai import generativelanguage as glm
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
 except ImportError:
-    # This is a fallback for older versions, assuming logger is configured later
     logging.critical("Failed to import google.ai.generativelanguage (glm). Ensure 'google-ai-generativelanguage' is installed.")
     glm = None
 
@@ -43,7 +42,6 @@ logger.info("dotenv loaded.")
 AI_COUNCIL_TELEGRAM_BOT_TOKEN = os.getenv("AI_COUNCIL_TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Load a comma-separated string of user IDs and parse it into a list of integers.
 AUTHORIZED_USER_IDS_STR = os.getenv("AUTHORIZED_USER_IDS", "")
 AUTHORIZED_USER_IDS = []
 if AUTHORIZED_USER_IDS_STR:
@@ -120,7 +118,6 @@ PROMPTS = {
     "obsidian_note": load_prompt("obsidian_note.txt"),
 }
 
-# Critical check to ensure all prompts were loaded
 if not all(PROMPTS.values()):
     missing_prompts = [key for key, value in PROMPTS.items() if value is None]
     logger.critical(f"One or more essential prompt files could not be loaded: {missing_prompts}. Exiting.")
@@ -350,7 +347,6 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     chosen_language_code = query.data.split('_')[1]
-    ### ADDED LOGGING ###
     logger.info(f"--- LANGUAGE DEBUG: Callback received, chosen_language_code: '{chosen_language_code}'")
 
     user_data = context.user_data
@@ -362,19 +358,17 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
         return ConversationHandler.END
 
     language_name = LANGUAGE_NAME_MAP.get(chosen_language_code)
-    ### ADDED LOGGING ###
     logger.info(f"--- LANGUAGE DEBUG: Mapped language_name: '{language_name}'")
     if not language_name:
         logger.warning(f"Unknown language code: {chosen_language_code}. Defaulting to English.")
         language_name = "английском"
     
-    try:
-        prompt_text = prompt_template.format(language_name_locative=language_name)
-    except KeyError:
-        logger.warning(f"Prompt for '{method}' lacks a language placeholder. Prepending language instruction manually.")
-        prompt_text = f"Generate all content in {language_name} language.\n\n{prompt_template}"
+    ### MODIFIED ### This is the corrected logic.
+    # It now ALWAYS prepends the language instruction to ensure it is followed.
+    # This makes the language selection robust, regardless of the prompt's content.
+    language_instruction = f"Generate all content in {language_name} language."
+    prompt_text = f"{language_instruction}\n\n---\n\n{prompt_template}"
     
-    ### ADDED LOGGING ###
     logger.info(f"--- LANGUAGE DEBUG: Final prompt being sent to AI (first 700 chars): {prompt_text[:700]}...")
     
     await query.edit_message_text(f"Processing '{method.replace('_', ' ').title()}' in {language_name}... This may take a moment.")
