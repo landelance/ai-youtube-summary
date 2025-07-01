@@ -80,11 +80,11 @@ STATUS_SUCCESS = "success"
 STATUS_ERROR_LLM = "error_llm"
 STATUS_ERROR_YOUTUBE = "error_youtube"
 
-CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-2.5-flash")
-GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-2.5-flash")
+CHAT_MODEL_NAME = os.getenv("GEMINI_MODEL_CHAT", "gemini-1.5-flash")
+GEMINI_API_VIDEO_MODEL = os.getenv("GEMINI_MODEL_VIDEO_API", "gemini-1.5-flash")
 
 # Conversation states
-CHOOSING_METHOD, CHOOSING_LANGUAGE = range(2)
+CHOOSING_METHOD, CHOOSING_LANGUAGE, CHOOSING_EXPERIMENTAL = range(3) ### MODIFIED ### Added new state
 
 LANGUAGE_NAME_MAP = {
     "ru": "русском",
@@ -131,14 +131,21 @@ logger.info("All essential prompts loaded successfully.")
 def authorized(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        if update.effective_user.id not in AUTHORIZED_USER_IDS:
-            logger.warning(f"Unauthorized access from user_id: {update.effective_user.id}")
-            await update.message.reply_text("Sorry, you do not have access to this bot.")
-            if isinstance(context, ConversationHandler):
-                return ConversationHandler.END
+        user = update.effective_user
+        if not user or user.id not in AUTHORIZED_USER_IDS:
+            logger.warning(f"Unauthorized access from user_id: {user.id if user else 'Unknown'}")
+            # Check if called from a message or a callback query
+            if update.message:
+                await update.message.reply_text("Sorry, you do not have access to this bot.")
+            elif update.callback_query:
+                await update.callback_query.answer("Sorry, you do not have access to this bot.", show_alert=True)
+
+            if 'conversation' in str(func): # A simple check if it's part of a conversation
+                 return ConversationHandler.END
             return
         return await func(update, context, *args, **kwargs)
     return wrapper
+
 
 def init_db():
     try:
@@ -267,6 +274,8 @@ async def _build_main_menu_keyboard(query: CallbackQueryHandler | None = None, u
         [InlineKeyboardButton("Detailed Summary", callback_data='method_detailed_summary')],
         [InlineKeyboardButton("Super Transcript (File)", callback_data='method_super_transcript')],
         [InlineKeyboardButton("Custom Formats >>", callback_data='custom_prompts_menu')],
+        ### ADDED ### New button for the experimental menu
+        [InlineKeyboardButton("Experimental Processes >>", callback_data='experimental_menu')],
         [InlineKeyboardButton("Cancel", callback_data='cancel_summary')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -287,6 +296,30 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return CHOOSING_METHOD
     await update.message.reply_text("Please send me a valid YouTube link.")
     return ConversationHandler.END
+
+### ADDED ### Placeholder handler for experimental features
+@authorized
+async def placeholder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    feature_name = query.data.replace('exp_', '').replace('_', ' ').title()
+    await query.edit_message_text(text=f"The '{feature_name}' feature is currently under development. Please check back later.")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+### ADDED ### Handler to show the experimental menu
+@authorized
+async def experimental_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("Separate Audio Track", callback_data='exp_audio_separation')],
+        [InlineKeyboardButton("Download Transcript", callback_data='exp_download_transcript')],
+        [InlineKeyboardButton("<< Back to Main Menu", callback_data='back_to_main_menu')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text="Choose an experimental process:", reply_markup=reply_markup)
+    return CHOOSING_METHOD # Reuse the same state
 
 @authorized
 async def choose_method_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -335,11 +368,16 @@ async def process_request_callback(update: Update, context: ContextTypes.DEFAULT
         logger.warning(f"Unknown language code: {chosen_language_code}. Defaulting to English.")
         language_name = "английском"
     
-    # Format the prompt, and ensure language instruction is included
+    ### MODIFIED ### Language fix logic
+    # This logic ensures that even if a prompt template doesn't have a placeholder for language,
+    # the instruction to use a specific language is prepended to the prompt.
     try:
+        # Try to format, assuming the placeholder exists
         prompt_text = prompt_template.format(language_name_locative=language_name)
     except KeyError:
-        logger.warning(f"Prompt for {method} lacks language placeholder. Prepending language instruction.")
+        # If the placeholder is missing, prepend the language instruction manually.
+        # This fixes the bug for custom prompts that don't have the placeholder.
+        logger.warning(f"Prompt for '{method}' lacks a language placeholder. Prepending language instruction.")
         prompt_text = f"Generate all content in {language_name} language.\n\n{prompt_template}"
     
     logger.info(f"Formatted prompt: {prompt_text[:500]}...")
@@ -404,12 +442,15 @@ def main() -> None:
     try:
         application = Application.builder().token(AI_COUNCIL_TELEGRAM_BOT_TOKEN).build()
 
+        ### MODIFIED ### Updated ConversationHandler to include new menus and states
         summary_conv_handler = ConversationHandler(
             entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)],
             states={
                 CHOOSING_METHOD: [
                     CallbackQueryHandler(choose_method_callback, pattern='^method_'),
                     CallbackQueryHandler(choose_method_callback, pattern='^custom_prompts_menu$'),
+                    CallbackQueryHandler(experimental_menu_callback, pattern='^experimental_menu$'),
+                    CallbackQueryHandler(placeholder_callback, pattern='^exp_'),
                     CallbackQueryHandler(back_to_main_menu_callback, pattern='^back_to_main_menu$'),
                 ],
                 CHOOSING_LANGUAGE: [
